@@ -1,0 +1,32 @@
+Hostname: DESKTOP-69J18CV
+Direcciones IP asociadas:
+  - 192.168.0.5
+Dirección IP externa: 181.126.65.203
+
+Información detallada de las interfaces de red:
+
+Interfaz: Ethernet
+  - MAC: 1C-1B-0D-83-0B-7A
+  - Dirección IP: 169.254.209.200
+  - Dirección IPv6: fe80::ad4f:b9c9:f4d9:5746
+
+Interfaz: Conexión de área local* 1
+  - MAC: 42-ED-00-B7-FD-70
+  - Dirección IP: 169.254.180.166
+  - Dirección IPv6: fe80::cdc7:4585:a8ca:334c
+
+Interfaz: Conexión de área local* 2
+  - MAC: 40-ED-00-B7-FD-70
+  - Dirección IP: 169.254.79.224
+  - Dirección IPv6: fe80::48e8:261a:7bb7:e3b0
+
+Interfaz: Wi-Fi
+  - MAC: 40-ED-00-B7-FD-70
+  - Dirección IP: 192.168.0.5
+  - Dirección IPv6: ::3a5c:cb41:bdbe:b948
+  - Dirección IPv6: ::8931:825d:8596:9a6d
+  - Dirección IPv6: fe80::a155:cbc2:6702:9c6f
+
+Interfaz: Loopback Pseudo-Interface 1
+  - Dirección IP: 127.0.0.1
+  - Dirección IPv6: ::1
