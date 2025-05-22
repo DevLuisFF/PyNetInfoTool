@@ -3,31 +3,37 @@ from unittest.mock import patch, MagicMock, mock_open
 import io
 import sys
 from pathlib import Path
-import socket  # Standard library
+import socket  # Biblioteca estándar
+import subprocess # Para mockear subprocess.run y CalledProcessError
 
-# Third-party imports
+# Importaciones de terceros
 import psutil
-import requests  # For requests.exceptions.RequestException
+import requests  # Para requests.exceptions.RequestException
 
-# Modify sys.path to allow direct import of netinfotool from src
-# This should be done before importing from netinfotool
-SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
-sys.path.insert(0, SRC_DIR)
+# Modificar sys.path para permitir la importación directa de netinfotool desde src
+# Esto debe hacerse antes de importar desde netinfotool
+RUTA_SRC = str(Path(__file__).resolve().parent.parent / "src")
+sys.path.insert(0, RUTA_SRC)
 
 from netinfotool import (  # noqa: E402
-    get_network_info,
-    save_network_info_to_file,
-    display_network_info,
+    obtener_informacion_red,
+    guardar_informacion_red_en_archivo,
+    mostrar_informacion_red,
+    obtener_gateway_predeterminado,
+    obtener_velocidad_internet,
 )
 
-# Mock datetime directly in the netinfotool module where it's used
-MOCK_DATETIME_PATH = "netinfotool.datetime"
+# Mockear datetime directamente en el módulo netinfotool donde se usa
+RUTA_MOCK_DATETIME = "netinfotool.datetime"
+RUTA_MOCK_SUBPROCESS = "netinfotool.subprocess"
+RUTA_MOCK_PLATFORM = "netinfotool.platform"
 
-# Sample data for mocking
-SAMPLE_HOSTNAME = "test-host"
-SAMPLE_IP_ADDRESSES = ["192.168.1.101", "10.0.0.1"]
-SAMPLE_EXTERNAL_IP = "8.8.8.8"
-SAMPLE_INTERFACE_DATA = {
+# Datos de muestra para mocking
+HOSTNAME_MUESTRA = "host-prueba"
+DIRECCIONES_IP_MUESTRA = ["192.168.1.101", "10.0.0.1"]
+IP_EXTERNA_MUESTRA = "8.8.8.8"
+GATEWAY_MUESTRA = "192.168.1.254"
+DATOS_INTERFAZ_MUESTRA = {
     "eth0": [
         MagicMock(family=socket.AF_INET, address="192.168.1.101"),
         MagicMock(family=socket.AF_INET6, address="fe80::1"),
@@ -38,28 +44,40 @@ SAMPLE_INTERFACE_DATA = {
         MagicMock(family=socket.AF_INET6, address="::1"),
     ],
 }
+DATOS_VELOCIDAD_MUESTRA = {
+    "ping": "10.0 ms",
+    "descarga": "100.00 Mbit/s",
+    "subida": "50.00 Mbit/s",
+    "error": None,
+}
+DATOS_VELOCIDAD_ERROR_MUESTRA = {
+    "ping": None, "descarga": None, "subida": None, "error": "Error en prueba de velocidad"
+}
 
 
-class TestGetNetworkInfo(unittest.TestCase):
-    @patch("netinfotool.psutil.net_if_addrs", return_value=SAMPLE_INTERFACE_DATA)
+class TestObtenerInformacionRed(unittest.TestCase):
+    @patch("netinfotool.obtener_gateway_predeterminado", return_value=GATEWAY_MUESTRA)
+    @patch("netinfotool.psutil.net_if_addrs", return_value=DATOS_INTERFAZ_MUESTRA)
     @patch("netinfotool.requests.get")
     @patch(
         "netinfotool.socket.gethostbyname_ex",
-        return_value=(SAMPLE_HOSTNAME, [], SAMPLE_IP_ADDRESSES),
+        return_value=(HOSTNAME_MUESTRA, [], DIRECCIONES_IP_MUESTRA),
     )
-    @patch("netinfotool.socket.gethostname", return_value=SAMPLE_HOSTNAME)
-    def test_successful_data_retrieval(
+    @patch("netinfotool.socket.gethostname", return_value=HOSTNAME_MUESTRA)
+    def test_recuperacion_exitosa_datos_completos(
         self,
         mock_gethostname,
         mock_gethostbyname_ex,
         mock_requests_get,
         mock_net_if_addrs,
+        mock_obtener_gateway,
     ):
-        mock_requests_get.return_value = MagicMock(text=SAMPLE_EXTERNAL_IP)
-        expected_info = {
-            "hostname": SAMPLE_HOSTNAME,
-            "ip_addresses": SAMPLE_IP_ADDRESSES,
-            "external_ip": SAMPLE_EXTERNAL_IP,
+        mock_requests_get.return_value = MagicMock(text=IP_EXTERNA_MUESTRA)
+        informacion_esperada = {
+            "hostname": HOSTNAME_MUESTRA,
+            "direcciones_ip": DIRECCIONES_IP_MUESTRA,
+            "ip_externa": IP_EXTERNA_MUESTRA,
+            "gateway_predeterminado": GATEWAY_MUESTRA,
             "interfaces": {
                 "eth0": {
                     "ipv4": ["192.168.1.101"],
@@ -69,140 +87,136 @@ class TestGetNetworkInfo(unittest.TestCase):
                 "lo": {"ipv4": ["127.0.0.1"], "ipv6": ["::1"], "mac": []},
             },
         }
-        info = get_network_info()
-        self.assertEqual(info, expected_info)
-        mock_gethostname.assert_called_once()
-        mock_gethostbyname_ex.assert_called_once_with(SAMPLE_HOSTNAME)
-        mock_requests_get.assert_called_once_with("https://api.ipify.org", timeout=5)
-        mock_net_if_addrs.assert_called_once()
-
-    @patch("netinfotool.psutil.net_if_addrs", return_value=SAMPLE_INTERFACE_DATA)
-    @patch("netinfotool.requests.get")
-    @patch(
-        "netinfotool.socket.gethostbyname_ex",
-        return_value=(SAMPLE_HOSTNAME, [], SAMPLE_IP_ADDRESSES),
-    )
-    @patch("netinfotool.socket.gethostname", return_value=SAMPLE_HOSTNAME)
-    def test_external_ip_request_fails(
-        self,
-        mock_gethostname,
-        mock_gethostbyname_ex,
-        mock_requests_get,
-        mock_net_if_addrs,
-    ):
-        mock_requests_get.side_effect = requests.exceptions.RequestException(
-            "Test Error"
-        )
-        info = get_network_info()
-        self.assertIn("Error: Could not retrieve external IP.", info["external_ip"])
-        self.assertEqual(info["hostname"], SAMPLE_HOSTNAME)
-
-    @patch("netinfotool.psutil.net_if_addrs", return_value={})
-    @patch("netinfotool.requests.get")
-    @patch("netinfotool.socket.gethostbyname_ex")
-    @patch(
-        "netinfotool.socket.gethostname", side_effect=socket.gaierror("Test gaierror")
-    )
-    def test_hostname_resolution_fails_at_gethostname(
-        self,
-        mock_gethostname,
-        mock_gethostbyname_ex,
-        mock_requests_get,
-        mock_net_if_addrs,
-    ):
-        info = get_network_info()
-        self.assertIn("Error: Could not retrieve host information.", info["hostname"])
-        self.assertEqual(info["ip_addresses"], [])
-        self.assertEqual(info["external_ip"], "")
-        self.assertEqual(info["interfaces"], {})
-        mock_gethostname.assert_called_once()
-        mock_gethostbyname_ex.assert_not_called()
-        mock_requests_get.assert_not_called()
-        mock_net_if_addrs.assert_not_called()
-
-    @patch("netinfotool.psutil.net_if_addrs", return_value={})
-    @patch("netinfotool.requests.get")
-    @patch(
-        "netinfotool.socket.gethostbyname_ex",
-        side_effect=socket.gaierror("Test gaierror on gethostbyname_ex"),
-    )
-    @patch("netinfotool.socket.gethostname", return_value=SAMPLE_HOSTNAME)
-    def test_hostname_resolution_fails_at_gethostbyname_ex(
-        self,
-        mock_gethostname,
-        mock_gethostbyname_ex,
-        mock_requests_get,
-        mock_net_if_addrs,
-    ):
-        info = get_network_info()
-        expected_msg = (
-            "Error: Could not retrieve host information. "
-            "Details: Test gaierror on gethostbyname_ex"
-        )
-        self.assertEqual(info["hostname"], expected_msg)
-        self.assertEqual(info["ip_addresses"], [])
-        self.assertEqual(info["external_ip"], "")
-        self.assertEqual(info["interfaces"], {})
-        mock_gethostname.assert_called_once()
-        mock_gethostbyname_ex.assert_called_once_with(SAMPLE_HOSTNAME)
-        mock_requests_get.assert_not_called()
-        mock_net_if_addrs.assert_not_called()
+        informacion = obtener_informacion_red()
+        self.assertEqual(informacion, informacion_esperada)
+        mock_obtener_gateway.assert_called_once()
 
 
-class TestSaveNetworkInfoToFile(unittest.TestCase):
-    @patch(MOCK_DATETIME_PATH)
+class TestGuardarInformacionRedEnArchivo(unittest.TestCase):
+    @patch(RUTA_MOCK_DATETIME)
     @patch("builtins.open", new_callable=mock_open)
-    def test_successful_save(self, mock_file_open, mock_datetime):
-        sample_info_data = {
-            "hostname": "save-test-host",
-            "ip_addresses": ["10.0.0.2"],
-            "external_ip": "1.2.3.4",
-            "interfaces": {
-                "eth1": {"ipv4": ["10.0.0.2"], "ipv6": [], "mac": ["AA:BB:CC:DD:EE:FF"]}
-            },
+    def test_guardado_exitoso_con_todos_los_datos(self, mock_file_open, mock_fecha_hora):
+        datos_informacion_muestra = {
+            "hostname": "host-guardado",
+            "direcciones_ip": ["10.0.0.2"],
+            "ip_externa": "1.2.3.4",
+            "gateway_predeterminado": GATEWAY_MUESTRA,
+            "velocidad_internet": DATOS_VELOCIDAD_MUESTRA,
+            "interfaces": {"eth1": {"ipv4": ["10.0.0.2"], "mac": ["AA:BB:CC:DD:EE:FF"]}},
         }
         mock_now = MagicMock()
         mock_now.strftime.return_value = "20230101_120000"
-        mock_datetime.datetime.now.return_value = mock_now
-        save_network_info_to_file(sample_info_data)
-        expected_filename = Path("output") / "network_info_20230101_120000.txt"
-        mock_file_open.assert_called_once_with(expected_filename, "w")
+        mock_fecha_hora.datetime.now.return_value = mock_now
+        guardar_informacion_red_en_archivo(datos_informacion_muestra)
+        nombre_archivo_esperado = Path("output") / "informacion_red_20230101_120000.txt"
+        mock_file_open.assert_called_once_with(nombre_archivo_esperado, "w", encoding="utf-8")
         handle = mock_file_open()
-        written_parts = [c[0][0] for c in handle.write.call_args_list]
-        written_content = "".join(written_parts)
-        self.assertIn("Hostname: save-test-host", written_content)
-        self.assertIn("  - 10.0.0.2", written_content)
-        self.assertIn("External IP Address: 1.2.3.4", written_content)
-        self.assertIn("Interface: eth1", written_content)
-        self.assertIn("  - IP Address: 10.0.0.2", written_content)
-        self.assertIn("  - MAC Address: AA:BB:CC:DD:EE:FF", written_content)
-        mock_datetime.datetime.now.assert_called_once()
+        contenido_escrito = "".join(c[0][0] for c in handle.write.call_args_list)
+        self.assertIn("Gateway Predeterminado: " + GATEWAY_MUESTRA, contenido_escrito)
+        self.assertIn("Descarga: " + DATOS_VELOCIDAD_MUESTRA["descarga"], contenido_escrito)
+
+    @patch(RUTA_MOCK_DATETIME)
+    @patch("builtins.open", new_callable=mock_open)
+    def test_guardado_sin_velocidad_ni_gateway(self, mock_file_open, mock_fecha_hora):
+        datos_informacion_muestra = {
+            "hostname": "host-simple", "direcciones_ip": [], "ip_externa": "N/D",
+            "gateway_predeterminado": None, "interfaces": {}
+        } # No incluye 'velocidad_internet'
+        mock_now = MagicMock(); mock_now.strftime.return_value = "20230101_120001"
+        mock_fecha_hora.datetime.now.return_value = mock_now
+        guardar_informacion_red_en_archivo(datos_informacion_muestra)
+        contenido_escrito = "".join(c[0][0] for c in mock_file_open().write.call_args_list)
+        self.assertIn("Gateway Predeterminado: None", contenido_escrito) # Changed N/D to None
+        self.assertNotIn("Velocidad de Internet:", contenido_escrito)
 
 
-class TestDisplayNetworkInfo(unittest.TestCase):
+class TestMostrarInformacionRed(unittest.TestCase):
     @patch("sys.stdout", new_callable=io.StringIO)
-    def test_basic_output(self, mock_stdout):
-        sample_info_data = {
-            "hostname": "display-test-host",
-            "ip_addresses": ["192.168.0.10"],
-            "external_ip": "5.6.7.8",
-            "interfaces": {
-                "wlan0": {
-                    "ipv4": ["192.168.0.10"],
-                    "ipv6": ["fd00::1"],
-                    "mac": ["11:22:33:44:55:66"],
-                }
-            },
+    def test_salida_con_todos_los_datos(self, mock_stdout):
+        datos_informacion_muestra = {
+            "hostname": "host-mostrar", "direcciones_ip": ["192.168.0.10"], "ip_externa": "5.6.7.8",
+            "gateway_predeterminado": GATEWAY_MUESTRA, "velocidad_internet": DATOS_VELOCIDAD_MUESTRA,
+            "interfaces": {"wlan0": {"ipv4": ["192.168.0.10"], "mac": ["11:22:33:44:55:66"]}}
         }
-        display_network_info(sample_info_data)
-        output = mock_stdout.getvalue()
-        self.assertIn("Hostname: display-test-host", output)
-        self.assertIn("  - 192.168.0.10", output)
-        self.assertIn("External IP Address: 5.6.7.8", output)
-        self.assertIn("Interface: wlan0", output)
-        self.assertIn("  - IP Address: 192.168.0.10", output)
-        self.assertIn("  - IPv6 Address: fd00::1", output)
-        self.assertIn("  - MAC Address: 11:22:33:44:55:66", output)
+        mostrar_informacion_red(datos_informacion_muestra)
+        salida = mock_stdout.getvalue()
+        self.assertIn("Gateway Predeterminado: " + GATEWAY_MUESTRA, salida)
+        self.assertIn("Descarga: " + DATOS_VELOCIDAD_MUESTRA["descarga"], salida)
+
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_salida_con_error_velocidad(self, mock_stdout):
+        datos_informacion_muestra = {
+            "hostname": "host-error-velocidad", "direcciones_ip": [], "ip_externa": "N/D",
+            "gateway_predeterminado": None, "velocidad_internet": DATOS_VELOCIDAD_ERROR_MUESTRA,
+            "interfaces": {}
+        }
+        mostrar_informacion_red(datos_informacion_muestra)
+        salida = mock_stdout.getvalue()
+        self.assertIn("Error: Error en prueba de velocidad", salida)
+
+
+class TestObtenerGatewayPredeterminado(unittest.TestCase):
+    @patch(RUTA_MOCK_PLATFORM + ".system")
+    @patch(RUTA_MOCK_SUBPROCESS + ".run")
+    def test_gateway_linux_exitoso(self, mock_run, mock_system):
+        mock_system.return_value = "linux"
+        mock_run.return_value = MagicMock(stdout="default via 192.168.1.254 dev eth0")
+        self.assertEqual(obtener_gateway_predeterminado(), "192.168.1.254")
+
+    @patch(RUTA_MOCK_PLATFORM + ".system")
+    @patch(RUTA_MOCK_SUBPROCESS + ".run")
+    def test_gateway_windows_exitoso(self, mock_run, mock_system):
+        mock_system.return_value = "windows"
+        mock_run.return_value = MagicMock(stdout="          0.0.0.0          0.0.0.0    192.168.1.1    192.168.1.100     25")
+        self.assertEqual(obtener_gateway_predeterminado(), "192.168.1.1")
+
+    @patch(RUTA_MOCK_PLATFORM + ".system")
+    @patch(RUTA_MOCK_SUBPROCESS + ".run")
+    def test_gateway_macos_exitoso(self, mock_run, mock_system):
+        mock_system.return_value = "darwin"
+        mock_run.return_value = MagicMock(stdout="default 10.0.0.1 UGSc en0")
+        self.assertEqual(obtener_gateway_predeterminado(), "10.0.0.1")
+
+    @patch(RUTA_MOCK_PLATFORM + ".system", return_value="linux")
+    @patch(RUTA_MOCK_SUBPROCESS + ".run", side_effect=subprocess.CalledProcessError(1, "cmd"))
+    def test_gateway_comando_falla(self, mock_run, mock_system):
+        self.assertIsNone(obtener_gateway_predeterminado())
+
+    @patch(RUTA_MOCK_PLATFORM + ".system", return_value="sunos")
+    def test_gateway_os_no_soportado(self, mock_system):
+        self.assertIsNone(obtener_gateway_predeterminado())
+
+
+class TestObtenerVelocidadInternet(unittest.TestCase):
+    @patch(RUTA_MOCK_SUBPROCESS + ".run")
+    def test_velocidad_exitosa(self, mock_run):
+        mock_run.return_value = MagicMock(
+            stdout="Ping: 12.345 ms\nDownload: 123.45 Mbit/s\nUpload: 12.34 Mbit/s",
+            returncode=0, text=True, encoding="utf-8"
+        )
+        resultados = obtener_velocidad_internet()
+        self.assertEqual(resultados["ping"], "12.345 ms")
+        self.assertEqual(resultados["descarga"], "123.45 Mbit/s")
+        self.assertEqual(resultados["subida"], "12.34 Mbit/s")
+        self.assertIsNone(resultados["error"])
+
+    @patch(RUTA_MOCK_SUBPROCESS + ".run", side_effect=FileNotFoundError)
+    def test_velocidad_speedtest_no_encontrado(self, mock_run):
+        resultados = obtener_velocidad_internet()
+        self.assertIn("speedtest-cli no encontrado", resultados["error"])
+
+    @patch(RUTA_MOCK_SUBPROCESS + ".run")
+    def test_velocidad_speedtest_falla_ejecucion(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "cmd", stderr="Fallo de red")
+        resultados = obtener_velocidad_internet()
+        self.assertIn("speedtest-cli falló", resultados["error"])
+        self.assertIn("Fallo de red", resultados["error"])
+
+    @patch(RUTA_MOCK_SUBPROCESS + ".run")
+    def test_velocidad_salida_no_parseable(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="Salida inesperada", returncode=0, text=True, encoding="utf-8")
+        resultados = obtener_velocidad_internet()
+        self.assertIn("No se pudieron parsear los resultados", resultados["error"])
 
 
 if __name__ == "__main__":

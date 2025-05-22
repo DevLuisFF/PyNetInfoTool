@@ -1,35 +1,35 @@
-name: Python CI
+name: Integración Continua Python
 
 on:
   push:
-    branches: [ main ] # Or your primary branch name
+    branches: [ main ] # O el nombre de tu rama principal
   pull_request:
-    branches: [ main ] # Or your primary branch name
+    branches: [ main ] # O el nombre de tu rama principal
 
 jobs:
-  build:
+  build: # El nombre del job, puede mantenerse en inglés o traducirse (ej. "construir")
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python
+    - name: Configurar Python
       uses: actions/setup-python@v3
       with:
-        python-version: '3.x' # Use a specific version like '3.10' or a range
+        python-version: '3.x' # Usar una versión específica como '3.10' o un rango
 
-    - name: Install dependencies
+    - name: Instalar dependencias
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Lint with Flake8
+    - name: Linting con Flake8
       run: |
-        # stop the build if there are Python syntax errors or undefined names
+        # detener la compilación si hay errores de sintaxis de Python o nombres no definidos
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        # exit-zero trata todos los errores como advertencias. El editor de GitHub tiene 127 caracteres de ancho
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
 
-    - name: Test with unittest
+    - name: Pruebas con unittest
       run: |
         python -m unittest discover tests

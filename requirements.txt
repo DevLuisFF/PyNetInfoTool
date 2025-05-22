@@ -2,3 +2,4 @@ psutil
 requests
 black
 flake8
+speedtest-cli

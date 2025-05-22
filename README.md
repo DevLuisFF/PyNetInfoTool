@@ -1,6 +1,6 @@
 <h1 align="left">PyNetInfoTool</h1>
 
-[![Python CI](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY/actions/workflows/ci.yml)
+[![Integración Continua Python](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY/actions/workflows/ci.yml)
 
 ###
 
@@ -13,13 +13,13 @@
 ###
 
 <div align="center">
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/python/python-original.svg" height="40" alt="python logo"  />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/python/python-original.svg" height="40" alt="logo de python"  />
   <img width="12" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/git/git-original.svg" height="40" alt="git logo"  />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/git/git-original.svg" height="40" alt="logo de git"  />
   <img width="12" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" height="40" alt="github logo"  />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" height="40" alt="logo de github"  />
   <img width="12" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vscode/vscode-original.svg" height="40" alt="vscode logo"  />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vscode/vscode-original.svg" height="40" alt="logo de vscode"  />
 </div>
 
 ###
@@ -56,54 +56,54 @@
 
 ###
 
-<h2 align="left">Contributing</h2>
+<h2 align="left">Contribuciones</h2>
 
 ###
 
-<p align="left">Contributions are welcome! Please feel free to submit a pull request or open an issue.</p>
+<p align="left">¡Las contribuciones son bienvenidas! No dude en enviar un pull request o abrir un issue.</p>
 
 ###
 
-<h2 align="left">Development</h2>
+<h2 align="left">Desarrollo</h2>
 
 ###
 
-<p align="left">This project uses Black for code formatting and Flake8 for linting.</p>
+<p align="left">Este proyecto utiliza Black para el formateo de código y Flake8 para el linting.</p>
 
-<p align="left">To format the code, run:</p>
+<p align="left">Para formatear el código, ejecute:</p>
 
 ```bash
 black .
 ```
 
-<p align="left">To check for linting issues, run:</p>
+<p align="left">Para verificar problemas de linting, ejecute:</p>
 
 ```bash
 flake8 .
 ```
 
-<p align="left">It's recommended to run these before committing changes.<br>
-Make sure to install these tools first: <code>pip install black flake8</code> or by installing all dependencies from <code>requirements.txt</code>.</p>
+<p align="left">Se recomienda ejecutar estos comandos antes de confirmar los cambios (commit).<br>
+Asegúrese de instalar primero estas herramientas: <code>pip install black flake8</code> o instalando todas las dependencias desde <code>requirements.txt</code>.</p>
 
 ###
 
-<h2 align="left">Running Tests</h2>
+<h2 align="left">Ejecución de Pruebas</h2>
 
 ###
 
-<p align="left">To run the unit tests, execute the following command from the root directory:</p>
+<p align="left">Para ejecutar las pruebas unitarias, ejecute el siguiente comando desde el directorio raíz:</p>
 
 ```bash
 python -m unittest discover tests
 ```
-<p align="left">Ensure you have installed all dependencies from <code>requirements.txt</code> first.</p>
+<p align="left">Asegúrese de haber instalado primero todas las dependencias desde <code>requirements.txt</code>.</p>
 
 ###
 
-<h2 align="left">CI/CD</h2>
+<h2 align="left">CI/CD (Integración Continua/Entrega Continua)</h2>
 
 ###
 
-<p align="left">This project uses GitHub Actions for Continuous Integration. The workflow is defined in <code>.github/workflows/ci.yml</code> and includes steps for linting with Flake8 and running unit tests with unittest on pushes and pull requests to the main branch.</p>
+<p align="left">Este proyecto utiliza GitHub Actions para la Integración Continua. El flujo de trabajo está definido en <code>.github/workflows/ci.yml</code> e incluye pasos para el linting con Flake8 y la ejecución de pruebas unitarias con unittest en cada push y pull request a la rama principal (main).</p>
 
 ###

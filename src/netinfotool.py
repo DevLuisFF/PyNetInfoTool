@@ -3,153 +3,370 @@ import requests
 import psutil
 import datetime
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+import subprocess
+import platform
+import re
 
 
-def get_network_info() -> Dict[str, Any]:
-    """Collects detailed network information of the system.
+def obtener_informacion_red() -> Dict[str, Any]:
+    """Recopila información detallada de la red del sistema.
 
-    Gathers hostname, associated IP addresses, external IP address,
-    and details about network interfaces (IPv4, IPv6, MAC).
-    Error messages are stored within the dictionary if issues occur.
+    Reúne el nombre de host, direcciones IP asociadas, dirección IP externa,
+    y detalles sobre las interfaces de red (IPv4, IPv6, MAC).
+    Los mensajes de error se almacenan dentro del diccionario si ocurren problemas.
 
     Returns:
-        Dict[str, Any]: A dictionary containing network information.
-                        Keys include 'hostname', 'ip_addresses', 'external_ip',
-                        and 'interfaces'. Values under 'interfaces' are dicts
-                        per interface, with 'ipv4', 'ipv6', and 'mac' lists.
-                        Error messages are stored as strings for relevant keys
-                        if data retrieval fails.
+        Dict[str, Any]: Un diccionario que contiene información de la red.
+                        Las claves incluyen 'hostname', 'direcciones_ip', 'ip_externa',
+                        e 'interfaces'. Los valores bajo 'interfaces' son diccionarios
+                        por interfaz, con listas 'ipv4', 'ipv6', y 'mac'.
+                        Los mensajes de error se almacenan como cadenas para las claves relevantes
+                        si falla la recuperación de datos.
     """
-    info: Dict[str, Any] = {
+    informacion: Dict[str, Any] = {
         "hostname": "",
-        "ip_addresses": [],
-        "external_ip": "",
+        "direcciones_ip": [],
+        "ip_externa": "",
         "interfaces": {},
+        "gateway_predeterminado": None,  # Nueva clave
     }
     try:
         hostname: str = socket.gethostname()
-        info["hostname"] = hostname
-        ip_addresses: List[str] = socket.gethostbyname_ex(hostname)[2]
-        info["ip_addresses"] = ip_addresses
+        informacion["hostname"] = hostname
+        # Obtener todas las IPs, filtrar las IPv6 locales de enlace más tarde si es necesario
+        direcciones_ip: List[str] = socket.gethostbyname_ex(hostname)[2]
+        informacion["direcciones_ip"] = direcciones_ip
 
         try:
-            info["external_ip"] = requests.get("https://api.ipify.org", timeout=5).text
+            # Se añade un tiempo de espera para la solicitud de IP externa
+            informacion["ip_externa"] = requests.get(
+                "https://api.ipify.org", timeout=5
+            ).text
         except requests.exceptions.RequestException as e:
-            info["external_ip"] = f"Error: Could not retrieve external IP. Details: {e}"
+            informacion[
+                "ip_externa"
+            ] = f"Error: No se pudo obtener la IP externa. Detalles: {e}"
 
-        interfaces_data = psutil.net_if_addrs()
-        for interface_name, addrs in interfaces_data.items():
-            info["interfaces"][interface_name] = {"ipv4": [], "ipv6": [], "mac": []}
-            for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    info["interfaces"][interface_name]["ipv4"].append(addr.address)
-                elif addr.family == socket.AF_INET6:
-                    info["interfaces"][interface_name]["ipv6"].append(addr.address)
-                elif addr.family == psutil.AF_LINK:  # type: ignore
-                    info["interfaces"][interface_name]["mac"].append(addr.address)
-        return info
+        datos_interfaces = psutil.net_if_addrs()
+        for nombre_interfaz, direcciones in datos_interfaces.items():
+            informacion["interfaces"][nombre_interfaz] = {
+                "ipv4": [],
+                "ipv6": [],
+                "mac": [],
+            }
+            for direccion in direcciones:
+                if direccion.family == socket.AF_INET:
+                    informacion["interfaces"][nombre_interfaz]["ipv4"].append(
+                        direccion.address
+                    )
+                elif direccion.family == socket.AF_INET6:
+                    informacion["interfaces"][nombre_interfaz]["ipv6"].append(
+                        direccion.address
+                    )
+                elif direccion.family == psutil.AF_LINK:  # type: ignore
+                    informacion["interfaces"][nombre_interfaz]["mac"].append(
+                        direccion.address
+                    )
+        
+        # Obtener gateway predeterminado
+        informacion["gateway_predeterminado"] = obtener_gateway_predeterminado()
+
+        # Obtener velocidad de internet (esto se hace aquí para que se incluya en los datos generales)
+        # La notificación al usuario sobre la lentitud se manejará en el menú si se elige explícitamente.
+        # Si se llama como parte de una recopilación general, puede que no queramos el mensaje aquí.
+        # Por ahora, lo incluimos en los datos, y el menú decidirá si imprimir el aviso.
+        # informacion["velocidad_internet"] = obtener_velocidad_internet() # Movido al menú
+
+        return informacion
     except socket.gaierror as e:
-        info["hostname"] = f"Error: Could not retrieve host information. Details: {e}"
-        # ip_addresses might be empty or partially filled if hostname was resolved but then failed.
-        # external_ip and interfaces would not have been populated.
-        return info
+        informacion[
+            "hostname"
+        ] = f"Error: No se pudo obtener la información del host. Detalles: {e}"
+        # direcciones_ip podría estar vacío o parcialmente lleno si el nombre de host se resolvió pero luego falló.
+        # ip_externa e interfaces no se habrían poblado.
+        return informacion
     except Exception as e:
-        # Catch-all for any other unexpected errors during psutil or other calls.
-        error_msg = "Unexpected error in network info gathering."
-        # Break the line before the f-string part to make it shorter
-        info["hostname"] = f"{error_msg} Details: {e}"
-        return info
+        # Captura general para cualquier otro error inesperado durante psutil u otras llamadas.
+        mensaje_error = "Error inesperado durante la recopilación de información de red."
+        informacion["hostname"] = f"{mensaje_error} Detalles: {e}"  # noqa: E501
+        return informacion
 
 
-def display_network_info(info_data: Dict[str, Any]) -> None:
-    """Displays the collected network information to the console.
+def obtener_gateway_predeterminado() -> Optional[str]:
+    """Obtiene la dirección IP del gateway predeterminado del sistema.
+
+    Utiliza comandos específicos de la plataforma para determinar el gateway.
+    Soporta Linux, Windows y macOS.
+
+    Returns:
+        Optional[str]: La dirección IP del gateway predeterminado como una cadena
+                       si se encuentra, None en caso contrario o si ocurre un error.
+    """
+    sistema = platform.system().lower()
+    try:
+        if sistema == "linux":
+            # Ejecuta 'ip route | grep default'
+            proceso = subprocess.run(
+                ["ip", "route"], capture_output=True, text=True, check=True
+            )
+            for linea in proceso.stdout.splitlines():
+                if "default via" in linea:
+                    # Extrae la IP: 'default via 192.168.1.1 dev eth0'
+                    partes = linea.split()
+                    return partes[2]
+        elif sistema == "windows":
+            # Ejecuta 'route print -4' y busca la línea con destino 0.0.0.0
+            # y que no sea la interfaz de loopback o la dirección de red misma.
+            proceso = subprocess.run(
+                ["route", "print", "-4"], capture_output=True, text=True, check=True
+            )
+            # Ejemplo de línea: '          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.101     25'
+            # El gateway es la tercera IP en estas líneas.
+            # Evitar la IP de la interfaz (cuarta IP) si es la misma que el gateway.
+            for linea in proceso.stdout.splitlines():
+                if "0.0.0.0" in linea and "On-link" not in linea: # On-link no es un gateway real
+                    partes = linea.split()
+                    if len(partes) >= 4 and partes[0] == "0.0.0.0" and partes[1] == "0.0.0.0":
+                        # Validar que es una IP
+                        match = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", partes[2])
+                        if match and partes[2] != "0.0.0.0" and partes[2] != "127.0.0.1":
+                             # Asegurarse de que no es la IP de la interfaz si la métrica es baja
+                            if len(partes) >= 5 and partes[3] != partes[2]:
+                                return partes[2]
+                            # Caso donde la IP de interfaz es diferente o no está clara, pero el gateway parece válido
+                            elif len(partes) < 5 :
+                                return partes[2]
+
+
+        elif sistema == "darwin":  # macOS
+            # Ejecuta 'netstat -nr | grep default'
+            proceso = subprocess.run(
+                ["netstat", "-nr"], capture_output=True, text=True, check=True
+            )
+            for linea in proceso.stdout.splitlines():
+                if linea.startswith("default"):
+                    # Ejemplo: 'default            192.168.1.1    UGSc           en0'
+                    partes = linea.split()
+                    if len(partes) > 1:
+                        return partes[1]
+        else:
+            return None # Sistema operativo no soportado
+    except (subprocess.CalledProcessError, FileNotFoundError, IndexError, Exception) as e:
+        # Silenciar errores y devolver None si el comando falla o el parseo no funciona
+        # print(f"Error al obtener gateway: {e}") # Descomentar para depuración
+        return None
+    return None
+
+
+def mostrar_informacion_red(datos_informacion: Dict[str, Any]) -> None:
+    """Muestra la información de red recopilada en la consola.
 
     Args:
-        info_data: A dictionary containing the network information,
-                   as returned by get_network_info().
+        datos_informacion: Un diccionario que contiene la información de red,
+                           devuelto por obtener_informacion_red().
     """
-    print(f"Hostname: {info_data.get('hostname', 'N/A')}")
-    print("Associated IP Addresses:")
-    for ip in info_data.get("ip_addresses", []):
+    print(f"Hostname: {datos_informacion.get('hostname', 'N/D')}")
+    print("Direcciones IP asociadas:")
+    for ip in datos_informacion.get("direcciones_ip", []):
         print(f"  - {ip}")
-    print(f"External IP Address: {info_data.get('external_ip', 'N/A')}")
+    print(f"Dirección IP externa: {datos_informacion.get('ip_externa', 'N/D')}")
+    print(f"Gateway Predeterminado: {datos_informacion.get('gateway_predeterminado', 'N/D')}")
 
-    print("\nDetailed Network Interface Information:")
-    for interface_name, details in info_data.get("interfaces", {}).items():
-        print(f"\nInterface: {interface_name}")
-        for ip in details.get("ipv4", []):
-            print(f"  - IP Address: {ip}")
-        for ip in details.get("ipv6", []):
-            print(f"  - IPv6 Address: {ip}")
-        for mac in details.get("mac", []):
-            print(f"  - MAC Address: {mac}")
+    velocidad = datos_informacion.get("velocidad_internet")
+    if velocidad:
+        print("\nVelocidad de Internet:")
+        if velocidad.get("error"):
+            print(f"  Error: {velocidad['error']}")
+        else:
+            print(f"  Ping: {velocidad.get('ping', 'N/D')}")
+            print(f"  Descarga: {velocidad.get('descarga', 'N/D')}")
+            print(f"  Subida: {velocidad.get('subida', 'N/D')}")
+
+    print("\nInformación detallada de las interfaces de red:")
+    for nombre_interfaz, detalles in datos_informacion.get("interfaces", {}).items():
+        print(f"\nInterfaz: {nombre_interfaz}")
+        for ip in detalles.get("ipv4", []):
+            print(f"  - Dirección IP: {ip}")
+        for ip in detalles.get("ipv6", []):
+            print(f"  - Dirección IPv6: {ip}")
+        for mac in detalles.get("mac", []):
+            print(f"  - Dirección MAC: {mac}")
 
 
-def save_network_info_to_file(info_data: Dict[str, Any]) -> None:
-    """Saves the collected network information to a timestamped text file.
+def guardar_informacion_red_en_archivo(datos_informacion: Dict[str, Any]) -> None:
+    """Guarda la información de red recopilada en un archivo de texto con marca de tiempo.
 
-    The file is saved in the 'output' directory.
+    El archivo se guarda en el directorio 'output'.
 
     Args:
-        info_data: A dictionary containing the network information,
-                   as returned by get_network_info().
+        datos_informacion: Un diccionario que contiene la información de red,
+                           devuelto por obtener_informacion_red().
     """
-    output_dir = Path("output")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    directorio_salida = Path("output")
+    directorio_salida.mkdir(parents=True, exist_ok=True)
 
-    timestamp: str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_name: str = f"network_info_{timestamp}.txt"
-    file_path: Path = output_dir / file_name
+    marca_tiempo: str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    nombre_archivo: str = f"informacion_red_{marca_tiempo}.txt"
+    ruta_archivo: Path = directorio_salida / nombre_archivo
 
-    content: List[str] = []
-    content.append(f"Hostname: {info_data.get('hostname', 'N/A')}")
-    content.append("Associated IP Addresses:")
-    for ip in info_data.get("ip_addresses", []):
-        content.append(f"  - {ip}")
-    content.append(f"External IP Address: {info_data.get('external_ip', 'N/A')}")
-    content.append("\nDetailed Network Interface Information:")
-    for interface_name, details in info_data.get("interfaces", {}).items():
-        content.append(f"\nInterface: {interface_name}")
-        for ip in details.get("ipv4", []):
-            content.append(f"  - IP Address: {ip}")
-        for ip in details.get("ipv6", []):
-            content.append(f"  - IPv6 Address: {ip}")
-        for mac in details.get("mac", []):
-            content.append(f"  - MAC Address: {mac}")
+    contenido: List[str] = []
+    contenido.append(f"Hostname: {datos_informacion.get('hostname', 'N/D')}")
+    contenido.append("Direcciones IP asociadas:")
+    for ip in datos_informacion.get("direcciones_ip", []):
+        contenido.append(f"  - {ip}")
+    contenido.append(
+        f"Dirección IP externa: {datos_informacion.get('ip_externa', 'N/D')}"
+    )
+    contenido.append(
+        f"Gateway Predeterminado: {datos_informacion.get('gateway_predeterminado', 'N/D')}"
+    )
+
+    velocidad = datos_informacion.get("velocidad_internet")
+    if velocidad:
+        contenido.append("\nVelocidad de Internet:")
+        if velocidad.get("error"):
+            contenido.append(f"  Error: {velocidad['error']}")
+        else:
+            contenido.append(f"  Ping: {velocidad.get('ping', 'N/D')}")
+            contenido.append(f"  Descarga: {velocidad.get('descarga', 'N/D')}")
+            contenido.append(f"  Subida: {velocidad.get('subida', 'N/D')}")
+
+    contenido.append("\nInformación detallada de las interfaces de red:")
+    for nombre_interfaz, detalles in datos_informacion.get("interfaces", {}).items():
+        contenido.append(f"\nInterfaz: {nombre_interfaz}")
+        for ip in detalles.get("ipv4", []):
+            contenido.append(f"  - Dirección IP: {ip}")
+        for ip in detalles.get("ipv6", []):
+            contenido.append(f"  - Dirección IPv6: {ip}")
+        for mac in detalles.get("mac", []):
+            contenido.append(f"  - Dirección MAC: {mac}")
 
     try:
-        with open(file_path, "w") as file:
-            file.write("\n".join(content))
-        print(f"Network information saved to {file_path}")
+        with open(ruta_archivo, "w", encoding="utf-8") as archivo:
+            archivo.write("\n".join(contenido))
+        print(f"Información de red guardada en {ruta_archivo}")
     except IOError as e:
-        print(f"Error saving information to file: {e}")
+        print(f"Error al guardar la información en el archivo: {e}")
 
 
-def menu() -> None:
-    """Displays an interactive menu for the user to choose actions."""
+def menu_principal() -> None:
+    """Muestra un menú interactivo para que el usuario elija acciones."""
     while True:
-        print("\n--- Menu ---")
-        print("1. Display host information")
-        print("2. Save information to file")
-        print("3. Exit")
-        choice: str = input("Select an option: ")
+        print("\n--- Menú Principal ---")
+        print("1. Mostrar toda la información del host (incluye prueba de velocidad)")
+        print("2. Guardar toda la información en archivo (incluye prueba de velocidad)")
+        print("3. Realizar solo prueba de velocidad de internet")
+        print("4. Mostrar solo información de Gateway")
+        print("5. Salir")
+        opcion: str = input("Seleccione una opción: ")
 
-        if choice == "1":
-            network_info = get_network_info()
-            display_network_info(network_info)
-        elif choice == "2":
-            network_info = get_network_info()
-            save_network_info_to_file(network_info)
-        elif choice == "3":
-            print("Exiting...")
+        if opcion == "1":
+            print("\nObteniendo información base del host...")
+            informacion_red = obtener_informacion_red()
+            print("Realizando prueba de velocidad de internet... Esto puede tardar unos momentos.")
+            informacion_red["velocidad_internet"] = obtener_velocidad_internet()
+            mostrar_informacion_red(informacion_red)
+        elif opcion == "2":
+            print("\nObteniendo información base del host...")
+            informacion_red = obtener_informacion_red()
+            print("Realizando prueba de velocidad de internet... Esto puede tardar unos momentos.")
+            informacion_red["velocidad_internet"] = obtener_velocidad_internet()
+            guardar_informacion_red_en_archivo(informacion_red)
+        elif opcion == "3":
+            print("\nRealizando prueba de velocidad de internet... Esto puede tardar unos momentos.")
+            velocidad = obtener_velocidad_internet()
+            # Mostrar solo la velocidad de internet
+            print("\n--- Resultados de Velocidad de Internet ---")
+            if velocidad.get("error"):
+                print(f"  Error: {velocidad['error']}")
+            else:
+                print(f"  Ping: {velocidad.get('ping', 'N/D')}")
+                print(f"  Descarga: {velocidad.get('descarga', 'N/D')}")
+                print(f"  Subida: {velocidad.get('subida', 'N/D')}")
+        elif opcion == "4":
+            print("\nObteniendo información del gateway predeterminado...")
+            gateway = obtener_gateway_predeterminado()
+            print("\n--- Gateway Predeterminado ---")
+            if gateway:
+                print(f"  Gateway: {gateway}")
+            else:
+                print("  No se pudo determinar el gateway predeterminado o no está configurado.")
+        elif opcion == "5":
+            print("Saliendo...")
             break
         else:
-            print("Invalid option. Please try again.")
+            print("Opción no válida. Por favor, intente de nuevo.")
 
 
 if __name__ == "__main__":
-    # Ensure global imports of datetime and os are available if not already.
-    # These are standard libraries and should be fine.
-    # Specific type imports from typing are handled at the top.
-    menu()
+    # Las importaciones globales de datetime ya están en la parte superior.
+    # Las importaciones de tipos específicos de 'typing' se manejan en la parte superior.
+    menu_principal()
+
+
+def obtener_velocidad_internet() -> Dict[str, Optional[str]]:
+    """Ejecuta una prueba de velocidad de internet usando speedtest-cli.
+
+    Intenta ejecutar 'speedtest-cli --simple' y parsea su salida
+    para obtener velocidades de descarga, subida y ping.
+
+    Returns:
+        Dict[str, Optional[str]]: Un diccionario con las claves 'descarga',
+                                  'subida', 'ping', y 'error'.
+                                  Los valores de velocidad/ping son cadenas si tienen éxito,
+                                  None si no se pueden parsear.
+                                  'error' es una cadena con un mensaje de error si la prueba
+                                  falla o speedtest-cli no se encuentra, None en caso contrario.
+    """
+    resultados: Dict[str, Optional[str]] = {
+        "descarga": None,
+        "subida": None,
+        "ping": None,
+        "error": None,
+    }
+    try:
+        # Ejecutar speedtest-cli
+        # Usar python -m speedtest para asegurar que se usa el instalado en el entorno
+        proceso = subprocess.run(
+            ["python", "-m", "speedtest", "--simple"],
+            capture_output=True,
+            text=True,
+            check=True, # Lanza CalledProcessError si speedtest-cli devuelve un código de error
+            encoding="utf-8" # Asegurar decodificación correcta
+        )
+        # Parsear la salida
+        # Ejemplo de salida:
+        # Ping: 12.345 ms
+        # Download: 123.45 Mbit/s
+        # Upload: 12.34 Mbit/s
+        for linea in proceso.stdout.splitlines():
+            if linea.startswith("Ping:"):
+                resultados["ping"] = linea.split("Ping:")[1].strip()
+            elif linea.startswith("Download:"):
+                resultados["descarga"] = linea.split("Download:")[1].strip()
+            elif linea.startswith("Upload:"):
+                resultados["subida"] = linea.split("Upload:")[1].strip()
+        
+        if resultados["ping"] is None and resultados["descarga"] is None and resultados["subida"] is None:
+             # Si no se parseó nada, es probable que la salida no fuera la esperada.
+            resultados["error"] = "No se pudieron parsear los resultados de speedtest-cli. Salida: " + proceso.stdout[:100]
+
+
+    except subprocess.CalledProcessError as e:
+        # speedtest-cli se ejecutó pero devolvió un error (ej. no se pudo conectar)
+        error_output = e.stderr or e.stdout or "Error desconocido de speedtest-cli."
+        resultados["error"] = (
+            f"speedtest-cli falló (código {e.returncode}): {error_output.strip()[:100]}"
+        )
+    except FileNotFoundError:
+        # speedtest-cli no está instalado o no se encuentra en el PATH
+        resultados["error"] = (
+            "speedtest-cli no encontrado. "
+            "Por favor, instálelo (pip install speedtest-cli)."
+        )
+    except Exception as e:
+        # Otros errores inesperados
+        resultados["error"] = f"Error inesperado al ejecutar speedtest-cli: {e}"
+
+    return resultados
