@@ -1,0 +1,6 @@
+[flake8]
+max-line-length = 88
+extend-ignore = E203, W503, E501
+# E203: whitespace before ':' (sometimes conflicts with black)
+# W503: line break before binary operator (black prefers this, flake8 default is after)
+# E501: line too long (managed by black, or acceptable if black formats it that way)
